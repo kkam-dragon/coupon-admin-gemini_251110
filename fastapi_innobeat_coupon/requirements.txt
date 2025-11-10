@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+# MariaDB (MySQL) 드라이버
+aiomysql
+sqlalchemy

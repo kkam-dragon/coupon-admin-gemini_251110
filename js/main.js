@@ -418,7 +418,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     if (sendBtn) {
-        sendBtn.addEventListener('click', () => {
+        sendBtn.addEventListener('click', async () => {
             // 필수 항목 유효성 검사
             const requiredFields = [
                 { id: 'clientName', name: '고객사' },
@@ -435,7 +435,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
             for (const field of requiredFields) {
                 const element = document.getElementById(field.id);
-                // dispatchDateTime은 내부의 input을 확인
                 const value = field.id === 'dispatchDateTime' ? element.querySelector('input').value : element.value;
 
                 if (!value.trim()) {
@@ -448,15 +447,22 @@ document.addEventListener('DOMContentLoaded', function() {
                     return;
                 }
             }
+            
+            const productNameInput = document.getElementById('productName');
+            if (!productNameInput.dataset.productId) {
+                alert('상품을 검색하여 선택해주세요.');
+                return;
+            }
 
-            // 수신자 번호 유효성 검사
+            // 수신자 번호 목록 가져오기
             const activeTab = document.querySelector('#recipient-tabs .nav-link.active');
+            let recipients = [];
             let recipientCount = 0;
 
             if (activeTab.id === 'simple-reg-tab') {
-                const recipientList = document.getElementById('recipientList').value;
+                const recipientListValue = document.getElementById('recipientList').value;
                 const validationResults = document.getElementById('recipientValidation').innerHTML;
-                if (recipientList.trim() === '') {
+                if (recipientListValue.trim() === '') {
                     alert('간편등록에 수신자 휴대폰 번호를 입력해주세요.');
                     document.getElementById('recipientList').focus();
                     return;
@@ -466,7 +472,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     document.getElementById('recipientList').focus();
                     return;
                 }
-                recipientCount = recipientList.split('\n').filter(line => line.trim() !== '').length;
+                recipients = recipientListValue.split('\n')
+                    .map(phone => phone.trim())
+                    .filter(phone => phone !== '')
+                    .map(phone => ({ phone_number: phone }));
             } else if (activeTab.id === 'bulk-reg-tab') {
                 const excelFile = document.getElementById('excelFileInput').value;
                 if (excelFile === '') {
@@ -474,21 +483,58 @@ document.addEventListener('DOMContentLoaded', function() {
                     document.getElementById('excelFileInput').focus();
                     return;
                 }
-                const countText = document.getElementById('excelRecipientCount').textContent;
-                recipientCount = parseInt(countText.replace(/[^0-9]/g, ''), 10);
+                // excelPreviewBody에서 전화번호 목록을 다시 읽어옴
+                const phoneCells = document.querySelectorAll('#excelPreviewBody td:nth-child(2)');
+                recipients = Array.from(phoneCells).map(cell => ({ phone_number: cell.textContent }));
             }
-
+            
+            recipientCount = recipients.length;
             if (recipientCount === 0) {
                 alert('등록된 수신자 휴대폰 번호가 없습니다.');
                 return;
             }
 
-            // 모든 유효성 검사 통과 시
+            // 최종 발송 확인
             const dispatchDateTime = document.querySelector('#dispatchDateTime input').value;
             const productName = document.getElementById('productName').value;
             if (confirm(`${dispatchDateTime}에 ${productName}을(를) 총 ${recipientCount}개의 휴대폰 번호로 발송이 됩니다. 정말 발송하시겠습니까?`)) {
-                alert('발송 요청이 완료되었습니다.');
-                location.reload(); // 성공 후 페이지 새로고침
+                
+                // API 요청 본문 데이터 구성
+                const dispatchData = {
+                    client_name: document.getElementById('clientName').value,
+                    sales_manager: document.getElementById('salesManager').value,
+                    client_requester: document.getElementById('clientRequester').value,
+                    requester_email: document.getElementById('requesterEmail').value,
+                    event_name: document.getElementById('eventName').value,
+                    dispatch_datetime: new Date(dispatchDateTime).toISOString(),
+                    product_id: parseInt(productNameInput.dataset.productId, 10),
+                    mms_title: document.getElementById('mmsTitle').value,
+                    mms_content: document.getElementById('mmsContent').value,
+                    sender_phone: document.getElementById('senderPhone').value,
+                    recipients: recipients
+                };
+
+                try {
+                    const response = await fetch('http://localhost:8089/api/dispatches', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(dispatchData),
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.detail || '알 수 없는 오류가 발생했습니다.');
+                    }
+
+                    alert('발송 요청이 완료되었습니다.');
+                    location.reload(); // 성공 후 페이지 새로고침
+
+                } catch (error) {
+                    console.error('Error creating dispatch:', error);
+                    alert(`발송 요청 중 오류가 발생했습니다: ${error.message}`);
+                }
             }
         });
     }
@@ -554,63 +600,78 @@ function validateEmail() {
     }
 }
 
-// 가상의 상품 데이터
-const sampleProducts = [
-    { name: "불고기 버거 세트", expiry: "60일", price: "5,000 / 7,000원", location: "전국 모든 매장" },
-    { name: "새우 버거 세트", expiry: "60일", price: "4,500 / 6,500원", location: "전국 모든 매장" },
-    { name: "아메리카노 (R)", expiry: "30일", price: "2,000 / 3,000원", location: "카페 A, 카페 B 전 지점" },
-    { name: "영화 관람권 (1인)", expiry: "5년", price: "10,000 / 15,000원", location: "CGV, 롯데시네마, 메가박스" },
-    { name: "치킨 콤보", expiry: "30일", price: "18,000 / 22,000원", location: "BBQ, BHC" },
-    { name: "피자 L 사이즈", expiry: "30일", price: "25,000 / 30,000원", location: "도미노피자, 피자헛" },
-    { name: "편의점 5천원권", expiry: "5년", price: "4,500 / 5,000원", location: "GS25, CU, 세븐일레븐" },
-    { name: "베이커리 1만원권", expiry: "60일", price: "9,000 / 10,000원", location: "파리바게뜨, 뚜레쥬르" },
-    { name: "아이스크림 파인트", expiry: "30일", price: "7,000 / 8,200원", location: "배스킨라빈스" },
-    { name: "주유 5천원 할인권", expiry: "60일", price: "0 / 5,000원", location: "SK, GS칼텍스" },
-    { name: "서점 1만원 도서상품권", expiry: "5년", price: "9,500 / 10,000원", location: "교보문고, 영풍문고" },
-    { name: "음악 스트리밍 1개월권", expiry: "30일", price: "7,900 / 8,900원", location: "멜론, 지니뮤직" },
-    { name: "OTT 1개월 이용권", expiry: "30일", price: "12,000 / 14,000원", location: "넷플릭스, 왓챠" },
-    { name: "특급호텔 숙박권", expiry: "5년", price: "250,000 / 300,000원", location: "신라호텔, 롯데호텔" },
-    { name: "백화점 5만원 상품권", expiry: "5년", price: "48,000 / 50,000원", location: "신세계, 롯데, 현대백화점" }
-];
+// 상품 데이터를 저장할 변수 (API로부터 받아옴)
+let availableProducts = [];
 
 // Bootstrap Modal 인스턴스를 저장할 변수
 let productModal;
 
 /**
- * 상품 검색 버튼 클릭 시, 상품 목록을 모달에 표시하는 함수
+ * 상품 검색 버튼 클릭 시, API를 통해 상품 목록을 조회하고 모달에 표시하는 함수
  */
-function searchProduct() {
+async function searchProduct() {
     const tableBody = document.getElementById('product-list-table');
-    // 기존 목록 초기화
-    tableBody.innerHTML = '';
+    tableBody.innerHTML = '<tr><td colspan="3" class="text-center">상품 목록을 불러오는 중...</td></tr>';
 
-    // 가상 데이터로 목록 생성
-    sampleProducts.forEach((product, index) => {
-        const row = `<tr>
-            <td>${product.name}</td>
-            <td>${product.location}</td>
-            <td>
-                <button type="button" class="btn btn-primary btn-sm" onclick="selectProduct(${index})">선택</button>
-            </td>
-        </tr>`;
-        tableBody.innerHTML += row;
-    });
-
-    // 모달을 띄웁니다.
+    // 모달을 먼저 띄웁니다.
     const modalElement = document.getElementById('productSearchModal');
-    productModal = new bootstrap.Modal(modalElement);
+    if (!productModal) {
+        productModal = new bootstrap.Modal(modalElement);
+    }
     productModal.show();
+
+    try {
+        // API로부터 상품 데이터 가져오기 (캐시된 데이터가 없으면)
+        if (availableProducts.length === 0) {
+            const response = await fetch('http://localhost:8089/api/products');
+            if (!response.ok) {
+                throw new Error('상품 목록을 불러오는데 실패했습니다.');
+            }
+            availableProducts = await response.json();
+        }
+
+        // 기존 목록 초기화
+        tableBody.innerHTML = '';
+
+        // API 데이터로 목록 생성
+        if (availableProducts.length === 0) {
+            tableBody.innerHTML = '<tr><td colspan="3" class="text-center">조회된 상품이 없습니다.</td></tr>';
+            return;
+        }
+        
+availableProducts.forEach(product => {
+            const row = `<tr>
+                <td>${product.name}</td>
+                <td>${product.location}</td>
+                <td>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="selectProduct(${product.id})">선택</button>
+                </td>
+            </tr>`;
+            tableBody.innerHTML += row;
+        });
+
+    } catch (error) {
+        console.error('Error fetching products:', error);
+        tableBody.innerHTML = `<tr><td colspan="3" class="text-center text-danger">오류: ${error.message}</td></tr>`;
+    }
 }
 
 /**
  * 모달에서 상품 선택 시, 해당 상품 정보를 메인 폼에 채워넣는 함수
- * @param {number} index - 선택한 상품의 sampleProducts 배열 인덱스
+ * @param {number} productId - 선택한 상품의 ID
  */
-function selectProduct(index) {
-    const selectedProduct = sampleProducts[index];
+function selectProduct(productId) {
+    const selectedProduct = availableProducts.find(p => p.id === productId);
+    if (!selectedProduct) {
+        alert('선택한 상품을 찾을 수 없습니다.');
+        return;
+    }
+
+    const productNameInput = document.getElementById("productName");
 
     // 필드에 값 채우기
-    document.getElementById("productName").value = selectedProduct.name;
+    productNameInput.value = selectedProduct.name;
+    productNameInput.dataset.productId = selectedProduct.id; // 숨겨진 데이터로 상품 ID 저장
     document.getElementById("product-expiry").value = selectedProduct.expiry;
     document.getElementById("product-price").value = selectedProduct.price;
     document.getElementById("product-location").value = selectedProduct.location;
